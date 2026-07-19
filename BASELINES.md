@@ -44,3 +44,7 @@ VERDICT: static/offline expert placement cannot survive workload shifts; the VRA
 ## pp fix — 2026-07-19: mmap was the pp killer
 ncmoe 20, --no-mmap: pp512 449.5 t/s (ub 512) / pp2048 707.5 t/s (ub 2048) vs 227 mmap'd. Use --no-mmap + -ub 2048 for hybrid. (Full sweep: bench_pp_sweep.log)
 Full sweep surprise: ncmoe 32 pp2048/ub2048 = 2280 t/s (vs 707 @ ncmoe 20) -> pp wants VRAM headroom for compute buffers; decode wants experts resident. The K=32 cache (3.6GB) serves both. mul_mat_id sentinel patch passes all test-backend-ops MUL_MAT_ID cases (CPU).
+
+## Baseline correction — 2026-07-19: --no-mmap lifts DECODE too
+tg128 @ ncmoe 20 with -mmp 0: 36.93 t/s (was 33.9 mmap'd, +9% free). NEW CANONICAL BASELINE: 36.9.
+GGML_VK_MAX_NODES_PER_SUBMIT=100000: 36.39 (neutral) -> vulkan submit batching already optimal at decode; boundary tax is inherent island sync. Lead resolved: reduce boundary COUNT via placement, not submit granularity. Solver recalibrated: predicted ~49 t/s @ 9.5GB budget.

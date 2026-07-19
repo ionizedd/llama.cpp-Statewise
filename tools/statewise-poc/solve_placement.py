@@ -8,7 +8,7 @@ T_BOUND = 145.0         # us per CPU<->GPU boundary (POC)
 T_MISS  = 55.0          # us per CPU expert (Q4 ~2.4MB @ 43GB/s)
 T_GPUL  = 50.0          # us full-GPU expert layer
 N_USED  = 8
-BASE_MS = 29.5          # measured token time @ ncmoe20 (33.9 t/s)
+BASE_MS = 27.1          # measured token time @ ncmoe20, --no-mmap (36.9 t/s, 2026-07-19)
 
 counts = defaultdict(dict)
 for row in csv.DictReader(open(CSV)):
@@ -60,3 +60,4 @@ pick = solve(9500)
 out = { str(l): {"tier": p[2], "K": p[3], "hit": round(coverage(l, p[3]) if p[2] == "cache" else (1.0 if p[2] == "gpu" else 0.0), 3)} for l, p in zip(LAYERS, pick) }
 json.dump(out, open(r"C:\dev\llama.cpp\statewise_placement.json", "w"), indent=1)
 print("wrote statewise_placement.json (9500MB budget)")
+
