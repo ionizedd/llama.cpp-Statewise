@@ -22,3 +22,16 @@ boundary 145us | cpu expert Q4 ~55us | full-GPU expert layer ~50us | expert 2.36
 
 ## Numbers that define the project
 tg: GPU-8B 109.8 | MoE static frontier 16.6->33.9 | pp fixed: 707-2280 | skew: cov32 70%(wiki)/84%(code) | hot-set overlap: 83.9% within / 11.3% cross | target: 44+ t/s then spec-decode on the 16.4ms.
+
+## Session addendum — 2026-07-19 "all out" research pass (2 sonnet agents + spec A/B)
+CORRECTION: the spec-decode heritage folder is OUTSIDE this repo at C:\Users\PC\.gemini\antigravity-ide\scratch\statewise_speculative_decoding (local machine only).
+
+### Speculative decoding (upstream infra verified: docs/speculative.md, tools/server/bench/speed-bench)
+Measured A/B, novel-codegen prompt, 256 tok, ncmoe20: baseline 32.9 t/s | ngram-simple 30.7 (WORSE) | ngram-map-k 33.1 (neutral). Draft acceptance only 6.25% - fresh generation does not repeat history. ngram pays off on LONG REPETITIVE contexts (editing loops, agent transcripts, RAG re-quotes); re-test there post-placement. Ceiling for novel gen = EAGLE-3 draft (verify HF checkpoints for Qwen3-30B-A3B exist; costs VRAM vs the 9.5GB placement budget - solve jointly). Old seed/codebook draft approach: honorably retired - superseded by upstream ngram-map-k (agent audit: PoC numbers were simulated w/ train/test leakage).
+
+### Agent verdicts
+- GFNI: KILLED with prejudice. ggml uses AND+SHIFT for byte-aligned nibble extraction (already optimal, more ports, 1cy vs GFNI 3cy); TQ1_0 is base-3 arithmetic (not GF(2)-linear - structurally impossible); decode is bandwidth-bound so ALU wins round to zero; ngram hash is a 3-line LCG, not hot. GFNI appears NOWHERE in upstream (0 code-search hits) - correctly so.
+- Successor lead from the GFNI autopsy: profile the missing CPU bandwidth (43 of ~65GB/s) - prefetch/access-pattern in the MoE expert gather. Memory-subsystem problem, not instruction selection.
+- NEW #1 boundary-tax lead (from Vern's gpu_step_acceleration.hip pattern): profile ggml-vulkan submission granularity per decode token (one vkQueueSubmit or many?). If many -> batch into fewer submissions. Cheap to profile; decides itself.
+- HARD CONSTRAINT (measured on THIS 7800X3D, bitshredder results_v2): sustained CPU read BW ~77GB/s up to ~90MB working set, then V-CACHE CLIFF -> ~44GB/s (-43%). Keep per-token CPU-touched expert bytes well under 90MB. Current worst case (miss set) is fine; matters if cold tier grows.
+- Not worth pursuing (agent audit): hdc_bvh (accuracy collapse), crystal_brain/seedpack (different research program), weight_distillation/seed proofs (Vern already self-disproved via seed_entropy_proof - respect).
