@@ -48,3 +48,16 @@ Full sweep surprise: ncmoe 32 pp2048/ub2048 = 2280 t/s (vs 707 @ ncmoe 20) -> pp
 ## Baseline correction — 2026-07-19: --no-mmap lifts DECODE too
 tg128 @ ncmoe 20 with -mmp 0: 36.93 t/s (was 33.9 mmap'd, +9% free). NEW CANONICAL BASELINE: 36.9.
 GGML_VK_MAX_NODES_PER_SUBMIT=100000: 36.39 (neutral) -> vulkan submit batching already optimal at decode; boundary tax is inherent island sync. Lead resolved: reduce boundary COUNT via placement, not submit granularity. Solver recalibrated: predicted ~49 t/s @ 9.5GB budget.
+
+## STATEWISE V1 CACHE — FIRST RESULTS, 2026-07-20 (all same-session, thrashed-box conditions)
+Config: LLAMA_STATEWISE_MAP (31 cached layers, wikitext profile) + -ot 31 layers exps=CPU. Cache 4.9GB VRAM.
+| workload | B: -ot only | C: + cache | verdict |
+| unconditioned gen (llama-bench tg64) | 26.4 | 25.8 | neutral: hot set mismatch (OOD) |
+| wikitext continuation (cli, temp 0)  | 28.2 | 31.2 | +10.6% (in-distribution) |
+Same-session ncmoe20 reference: 30.8 (uses ~8.5GB expert VRAM vs C ~4.9GB cache + 17 full layers).
+CORRECTNESS: temp-0 128-token wiki continuation is token-for-token IDENTICAL between B and C.
+THE THESIS, MEASURED: static profile cache wins in-distribution and does nothing out-of-distribution
+(predicted by 83.9%/11.3% hot-set overlap). v2 online adaptation is now the核心 deliverable.
+Engineering notes: shader-side sentinel guard costs ~11% globally (REJECTED - reverted; vulkan tripwire
+instead, cold side owned by CPU). Split is decode-only (n_tokens<=8); pp stays dense. pp under C dips
+(538->380) from cache VRAM eating compute-buffer headroom -> charge pp headroom in the solver later.

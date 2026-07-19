@@ -2907,6 +2907,7 @@ bool llama_model::statewise_init(const char * path_map) {
         l.statewise_map_hot   = p2.mh;
         l.statewise_map_cold  = p2.mc;
     }
+    fprintf(stderr, "statewise: cache active (%zu layers)\n", plans.size());
     LLAMA_LOG_INFO("statewise: cached %zu layers, %.1f MiB in device memory (incl. dummy slots)\n", plans.size(), total/1024.0/1024.0);
     return true;
 }

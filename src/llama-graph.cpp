@@ -1945,7 +1945,7 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
         cb(ids_hot,  "ffn_moe_ids_hot",  il);
         cb(ids_cold, "ffn_moe_ids_cold", il);
     }
-    ggml_tensor * sw_x = sw ? cur : nullptr; // FFN input, needed by the cold chain at the down site
+    ggml_tensor * sw_x = sw ? ggml_reshape_3d(ctx0, cur, cur->ne[0], 1, n_tokens) : nullptr; // FFN input as [n_embd,1,n_tokens] for the cold chain
 
     ggml_tensor * weights = ggml_get_rows(ctx0, probs, selected_experts); // [1, n_expert_used, n_tokens]
     cb(weights, "ffn_moe_weights", il);
