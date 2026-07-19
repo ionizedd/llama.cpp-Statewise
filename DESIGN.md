@@ -32,3 +32,16 @@ Risks: Vulkan dispatch overhead at small K; sched splits from extra nodes; refre
 
 ## Process note
 Upstream llama.cpp does not accept undisclosed AI-generated PRs (see PR #21620 fallout). This fork develops in the open under ionizedd; any upstreaming happens with explicit disclosure and human review by the repo owner.
+
+## POC results — 2026-07-19 (tools/statewise-poc, measured on 9070 XT + 7800X3D)
+Correctness: split (GPU hot-cache w/ dummy zero-slot + CPU full w/ sentinel ids) matches reference EXACTLY at f32, 1.7e-04 rel at f16. Mechanism proven.
+Costs (f16, n_embd 2048 / n_ff 768 / 8-of-128, n_tok=1):
+- all-GPU mul_mat_id: ~100us. all-CPU: ~240us (~30us/expert; Q4 real ~55us). SPLIT @87% hit: ~244us.
+- CPU<->GPU BOUNDARY TAX: ~145us per split point (submit+fence+copies), independent of work size.
+- parallel sched: 3-5x WORSE at this granularity. Sequential islands only.
+Lessons: sched won't assign GPU without explicit pins (set_tensor_backend or buffer-driven in llama); never let a CPU-weight node drift to GPU (BAR reads = 25ms disasters).
+
+## AMENDMENT: tiered placement as a knapsack
+Boundaries are a budgeted resource (~145us each), VRAM is the other budget. Per layer choose:
+(A) full-GPU experts: ~30us, 0 boundary, 300MB  (B) cached K experts: 145us + misses*55us, 1 boundary, K*2.4MB+dummy  (C) full-CPU: 145us + 8*55us, 1 boundary, 0MB.
+Optimizer: greedy/knapsack over measured per-layer coverage curves (expert_counts.csv) + this cost model -> per-layer K + tier assignment. NEXT: solve for 16GB, implement predicted-optimal config in llama-graph, A/B vs 33.9 t/s.

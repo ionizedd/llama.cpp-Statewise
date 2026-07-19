@@ -18,6 +18,7 @@ else()
     add_subdirectory(gguf-split)
     add_subdirectory(imatrix)
     add_subdirectory(expert-stats)
+    add_subdirectory(statewise-poc)
     add_subdirectory(llama-bench)
     add_subdirectory(completion)
     add_subdirectory(perplexity)
@@ -42,4 +43,5 @@ else()
     add_subdirectory(fit-params)
     add_subdirectory(results)
 endif()
+
 
