@@ -40,3 +40,7 @@ Full per-layer data: expert_counts.csv (layer,expert,count).
 Top-32/layer overlap: WITHIN-domain (wikitext A/B halves, 24k tok each) = 83.9%. CROSS-domain (wikitext vs C++ code) = 11.3% (random = 25% -> ANTI-correlated: true domain specialists).
 Code corpus is even skewier than prose: cov32 = 84.4% (vs 70.4), K90 avg 42.2 (vs 55.6).
 VERDICT: static/offline expert placement cannot survive workload shifts; the VRAM expert cache must be ONLINE-ADAPTIVE (usage counters + per-layer budgets + hysteresis). Domain switch re-warm cost ~3.6GB over ReBAR ~= 150ms one-time -> amortized in dozens of tokens. This is the statewise thesis, now with data.
+
+## pp fix — 2026-07-19: mmap was the pp killer
+ncmoe 20, --no-mmap: pp512 449.5 t/s (ub 512) / pp2048 707.5 t/s (ub 2048) vs 227 mmap'd. Use --no-mmap + -ub 2048 for hybrid. (Full sweep: bench_pp_sweep.log)
+Full sweep surprise: ncmoe 32 pp2048/ub2048 = 2280 t/s (vs 707 @ ncmoe 20) -> pp wants VRAM headroom for compute buffers; decode wants experts resident. The K=32 cache (3.6GB) serves both. mul_mat_id sentinel patch passes all test-backend-ops MUL_MAT_ID cases (CPU).
