@@ -331,6 +331,13 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * meta
             return {-2, nullptr};
         }
 
+        if (const char * sw_map = getenv("LLAMA_STATEWISE_MAP")) {
+            if (!model->statewise_init(sw_map)) {
+                LLAMA_LOG_ERROR("%s: statewise cache init failed for map '%s'\n", __func__, sw_map);
+                return {-2, nullptr};
+            }
+        }
+
         return {0, model_ptr.release()};
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: error loading model: %s\n", __func__, err.what());

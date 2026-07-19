@@ -1,5 +1,8 @@
 #include "llama-model.h"
 
+#include <fstream>
+#include <sstream>
+
 #include "llama-arch.h"
 #include "llama-ext.h"
 #include "llama-hparams.h"
@@ -1041,6 +1044,8 @@ llama_model::llama_model(const llama_model_params & params) : params(params), pi
 }
 
 llama_model::~llama_model() {
+    if (statewise_buf) { ggml_backend_buffer_free(statewise_buf); }
+    if (statewise_ctx) { ggml_free(statewise_ctx); }
     for (auto * lora : loras) {
         delete lora;
     }
@@ -2777,4 +2782,131 @@ const int32_t * llama_model_target_layer_ids(const struct llama_model * model) {
 
 uint32_t llama_model_target_layer_ids_n(const struct llama_model * model) {
     return (uint32_t) model->target_layer_ids.size();
+}
+
+
+//
+// statewise expert cache (LLAMA_STATEWISE_MAP)
+//
+
+bool llama_model::statewise_init(const char * path_map) {
+    // the loader runs a meta/planning pass first (unallocated tensors) - defer to the real pass
+    for (const auto & l : layers) {
+        if (l.ffn_gate_exps) {
+            if (l.ffn_gate_exps->data == nullptr) {
+                LLAMA_LOG_INFO("statewise: planning pass detected, deferring cache init\n");
+                return true;
+            }
+            break;
+        }
+    }
+    std::ifstream fin(path_map);
+    if (!fin) {
+        LLAMA_LOG_ERROR("statewise: cannot open map file '%s'\n", path_map);
+        return false;
+    }
+    const int n_expert_i = (int) hparams.n_expert;
+
+    struct sw_entry { int il; std::vector<int32_t> ids; };
+    std::vector<sw_entry> entries;
+    std::string line;
+    while (std::getline(fin, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream ss(line);
+        sw_entry e; int K = 0;
+        if (!(ss >> e.il >> K) || K <= 0) continue;
+        e.ids.resize(K);
+        for (int i = 0; i < K; i++) {
+            if (!(ss >> e.ids[i]) || e.ids[i] < 0 || e.ids[i] >= n_expert_i) {
+                LLAMA_LOG_ERROR("statewise: bad expert id in map, layer %d\n", e.il);
+                return false;
+            }
+        }
+        entries.push_back(std::move(e));
+    }
+    if (entries.empty()) {
+        LLAMA_LOG_ERROR("statewise: no entries in map file\n");
+        return false;
+    }
+
+    ggml_backend_dev_t dev = nullptr;
+    for (const auto & d : devices) {
+        if (!d.is_meta) { dev = d.dev; break; }
+    }
+    if (!dev) {
+        LLAMA_LOG_ERROR("statewise: no backend device\n");
+        return false;
+    }
+    ggml_backend_buffer_type_t buft = ggml_backend_dev_buffer_type(dev);
+
+    ggml_init_params ip = { (entries.size()*5 + 8)*ggml_tensor_overhead(), nullptr, true };
+    statewise_ctx = ggml_init(ip);
+
+    struct sw_plan { const sw_entry * e; ggml_tensor * gc; ggml_tensor * uc; ggml_tensor * dc; ggml_tensor * mh; ggml_tensor * mc; };
+    std::vector<sw_plan> plans;
+    for (const auto & e : entries) {
+        if (e.il < 0 || e.il >= (int) layers.size()) {
+            LLAMA_LOG_ERROR("statewise: bad layer index %d\n", e.il);
+            return false;
+        }
+        auto & l = layers[e.il];
+        if (!l.ffn_gate_exps || !l.ffn_up_exps || !l.ffn_down_exps) {
+            LLAMA_LOG_ERROR("statewise: layer %d has no expert tensors\n", e.il);
+            return false;
+        }
+        const int64_t K = (int64_t) e.ids.size();
+        sw_plan p2;
+        p2.e  = &e;
+        p2.gc = ggml_new_tensor_3d(statewise_ctx, l.ffn_gate_exps->type, l.ffn_gate_exps->ne[0], l.ffn_gate_exps->ne[1], K + 1);
+        p2.uc = ggml_new_tensor_3d(statewise_ctx, l.ffn_up_exps->type,   l.ffn_up_exps->ne[0],   l.ffn_up_exps->ne[1],   K + 1);
+        p2.dc = ggml_new_tensor_3d(statewise_ctx, l.ffn_down_exps->type, l.ffn_down_exps->ne[0], l.ffn_down_exps->ne[1], K + 1);
+        p2.mh = ggml_new_tensor_2d(statewise_ctx, GGML_TYPE_F32, 1, n_expert_i);
+        p2.mc = ggml_new_tensor_2d(statewise_ctx, GGML_TYPE_F32, 1, n_expert_i);
+        ggml_format_name(p2.gc, "blk.%d.ffn_gate_exps_cache", e.il);
+        ggml_format_name(p2.uc, "blk.%d.ffn_up_exps_cache",   e.il);
+        ggml_format_name(p2.dc, "blk.%d.ffn_down_exps_cache", e.il);
+        ggml_format_name(p2.mh, "blk.%d.statewise_map_hot",   e.il);
+        ggml_format_name(p2.mc, "blk.%d.statewise_map_cold",  e.il);
+        plans.push_back(p2);
+    }
+
+    statewise_buf = ggml_backend_alloc_ctx_tensors_from_buft(statewise_ctx, buft);
+    if (!statewise_buf) {
+        LLAMA_LOG_ERROR("statewise: cache buffer allocation failed\n");
+        return false;
+    }
+
+    std::vector<uint8_t> staging;
+    std::vector<float> map(n_expert_i);
+    size_t total = 0;
+    for (auto & p2 : plans) {
+        auto & l = layers[p2.e->il];
+        const int64_t K = (int64_t) p2.e->ids.size();
+        ggml_tensor * srcs[3] = { l.ffn_gate_exps, l.ffn_up_exps, l.ffn_down_exps };
+        ggml_tensor * dsts[3] = { p2.gc, p2.uc, p2.dc };
+        for (int t = 0; t < 3; t++) {
+            const size_t slab = ggml_nbytes(srcs[t]) / (size_t) srcs[t]->ne[2];
+            staging.resize(slab);
+            for (int64_t sl = 0; sl < K; sl++) {
+                ggml_backend_tensor_get(srcs[t], staging.data(), (size_t) p2.e->ids[sl]*slab, slab);
+                ggml_backend_tensor_set(dsts[t], staging.data(), (size_t) sl*slab, slab);
+            }
+            memset(staging.data(), 0, slab);
+            ggml_backend_tensor_set(dsts[t], staging.data(), (size_t) K*slab, slab);
+            total += ggml_nbytes(dsts[t]);
+        }
+        for (int i = 0; i < n_expert_i; i++) map[i] = (float) K;
+        for (int64_t sl = 0; sl < K; sl++) map[p2.e->ids[sl]] = (float) sl;
+        ggml_backend_tensor_set(p2.mh, map.data(), 0, (size_t) n_expert_i*sizeof(float));
+        for (int i = 0; i < n_expert_i; i++) map[i] = (float) i;
+        for (int64_t sl = 0; sl < K; sl++) map[p2.e->ids[sl]] = -1.0f;
+        ggml_backend_tensor_set(p2.mc, map.data(), 0, (size_t) n_expert_i*sizeof(float));
+        l.ffn_gate_exps_cache = p2.gc;
+        l.ffn_up_exps_cache   = p2.uc;
+        l.ffn_down_exps_cache = p2.dc;
+        l.statewise_map_hot   = p2.mh;
+        l.statewise_map_cold  = p2.mc;
+    }
+    LLAMA_LOG_INFO("statewise: cached %zu layers, %.1f MiB in device memory (incl. dummy slots)\n", plans.size(), total/1024.0/1024.0);
+    return true;
 }

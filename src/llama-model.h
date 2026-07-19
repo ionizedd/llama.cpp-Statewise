@@ -301,6 +301,13 @@ struct llama_layer {
     struct ggml_tensor * ffn_gate_inp_s    = nullptr; // gemma4
     struct ggml_tensor * ffn_gate_exps     = nullptr;
     struct ggml_tensor * ffn_down_exps     = nullptr;
+
+    // statewise expert cache (populated by llama_model::statewise_init)
+    struct ggml_tensor * ffn_gate_exps_cache = nullptr;
+    struct ggml_tensor * ffn_up_exps_cache   = nullptr;
+    struct ggml_tensor * ffn_down_exps_cache = nullptr;
+    struct ggml_tensor * statewise_map_hot   = nullptr;
+    struct ggml_tensor * statewise_map_cold  = nullptr;
     struct ggml_tensor * ffn_up_exps       = nullptr;
     struct ggml_tensor * ffn_gate_up_exps  = nullptr;
     struct ggml_tensor * ffn_gate_inp_b    = nullptr;
@@ -616,6 +623,11 @@ struct llama_model {
 
     // list of devices used in this model
     std::vector<llama_device> devices;
+
+    // statewise expert cache storage (LLAMA_STATEWISE_MAP)
+    ggml_context * statewise_ctx = nullptr;
+    ggml_backend_buffer_t statewise_buf = nullptr;
+    bool statewise_init(const char * path_map);
 
     // for quantize-stats only
     std::vector<std::pair<std::string, struct ggml_tensor *>> tensors_by_name;

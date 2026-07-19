@@ -10288,6 +10288,10 @@ static void ggml_vk_mul_mat_id(ggml_backend_vk_context * ctx, vk_context& subctx
     ggml_tensor * src1 = dst->src[1];
     ggml_tensor * src2 = dst->src[2];
     VK_LOG_DEBUG("ggml_vk_mul_mat_id(" << src0 << ", " << src1 << ", " << src2 << ", " << dst << ")");
+    if (dst->op_params[0] == 1) {
+        // statewise: sentinel ids must never execute on Vulkan (the CPU backend owns the cold side)
+        GGML_ABORT("statewise: sentinel-bearing mul_mat_id scheduled on Vulkan - placement bug");
+    }
     if (ggml_vk_use_mul_mat_vec_id(cgraph, node_idx)) {
         ggml_vk_mul_mat_vec_id_q_f16(ctx, subctx, cgraph, node_idx);
     } else {

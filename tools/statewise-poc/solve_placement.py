@@ -61,3 +61,17 @@ out = { str(l): {"tier": p[2], "K": p[3], "hit": round(coverage(l, p[3]) if p[2]
 json.dump(out, open(r"C:\dev\llama.cpp\statewise_placement.json", "w"), indent=1)
 print("wrote statewise_placement.json (9500MB budget)")
 
+
+# emit runtime artifacts: flat map file (il K id0..idK-1) + -ot override regex
+lines = []
+cold_layers = []
+for l, p2 in zip(LAYERS, pick):
+    if p2[2] == "cache":
+        top = sorted(counts[l].items(), key=lambda kv: -kv[1])[:p2[3]]
+        lines.append("%d %d %s" % (l, p2[3], " ".join(str(e) for e, _ in top)))
+        cold_layers.append(str(l))
+    elif p2[2] == "cpu":
+        cold_layers.append(str(l))
+open(r"C:\dev\llama.cpp\statewise_map.txt", "w").write("\n".join(lines) + "\n")
+print("wrote statewise_map.txt (%d cached layers)" % len(lines))
+print("OT_OVERRIDE=blk\\.(%s)\\.ffn_(up|down|gate)_exps=CPU" % "|".join(cold_layers))

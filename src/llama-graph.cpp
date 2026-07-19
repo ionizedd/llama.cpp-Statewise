@@ -1771,7 +1771,8 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
          ggml_tensor * up_exps_s,
          ggml_tensor * gate_exps_s,
          ggml_tensor * down_exps_s,
-         ggml_tensor * selected_experts_in) const {
+         ggml_tensor * selected_experts_in,
+         const llama_statewise_layer * sw) const {
     return build_moe_ffn(
         cur,
         gate_inp,  /* gate_inp_b  */ nullptr,
@@ -1792,7 +1793,8 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
         up_exps_s,
         gate_exps_s,
         down_exps_s,
-        selected_experts_in
+        selected_experts_in,
+        sw
     );
 }
 
@@ -1820,7 +1822,8 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
          ggml_tensor * up_exps_s,
          ggml_tensor * gate_exps_s,
          ggml_tensor * down_exps_s,
-         ggml_tensor * selected_experts_in) const {
+         ggml_tensor * selected_experts_in,
+         const llama_statewise_layer * sw) const {
     const int64_t n_embd   = cur->ne[0];
     const int64_t n_tokens = cur->ne[1];
     const bool weight_before_ffn = arch == LLM_ARCH_LLAMA4; // for llama4, we apply the sigmoid-ed weights before the FFN
@@ -1926,6 +1929,24 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
         probs = ggml_reshape_3d(ctx0, probs, 1, n_expert, n_tokens);
     }
 
+    if (sw && n_tokens > 8) {
+        sw = nullptr; // decode-only split: prompt processing keeps the dense path
+    }
+    ggml_tensor * ids_hot  = nullptr;
+    ggml_tensor * ids_cold = nullptr;
+    if (sw) {
+        GGML_ASSERT(gate_up_exps == nullptr && "statewise split not implemented for merged gate_up");
+        ggml_tensor * mh = ggml_repeat_4d(ctx0, sw->map_hot,  1, n_expert, n_tokens, 1);
+        ggml_tensor * mc = ggml_repeat_4d(ctx0, sw->map_cold, 1, n_expert, n_tokens, 1);
+        ids_hot  = ggml_cast(ctx0, ggml_get_rows(ctx0, mh, selected_experts), GGML_TYPE_I32);
+        ids_cold = ggml_cast(ctx0, ggml_get_rows(ctx0, mc, selected_experts), GGML_TYPE_I32);
+        ids_hot  = ggml_reshape_2d(ctx0, ids_hot,  n_expert_used, n_tokens);
+        ids_cold = ggml_reshape_2d(ctx0, ids_cold, n_expert_used, n_tokens);
+        cb(ids_hot,  "ffn_moe_ids_hot",  il);
+        cb(ids_cold, "ffn_moe_ids_cold", il);
+    }
+    ggml_tensor * sw_x = sw ? cur : nullptr; // FFN input, needed by the cold chain at the down site
+
     ggml_tensor * weights = ggml_get_rows(ctx0, probs, selected_experts); // [1, n_expert_used, n_tokens]
     cb(weights, "ffn_moe_weights", il);
 
@@ -1993,7 +2014,11 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
         cb(up, "ffn_moe_up", il);
     } else {
         // separate gate and up path
-        up = build_lora_mm_id(up_exps, cur, selected_experts, up_exps_s); // [n_ff, n_expert_used, n_tokens]
+        if (sw) {
+                up = ggml_mul_mat_id(ctx0, sw->up_cache, cur, ids_hot); // hot side only; cold side has its own chain
+            } else {
+                up = build_lora_mm_id(up_exps, cur, selected_experts, up_exps_s); // [n_ff, n_expert_used, n_tokens]
+            }
         cb(up, "ffn_moe_up", il);
 
         if (up_exps_s) {
@@ -2006,7 +2031,11 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
         }
 
         if (gate_exps) {
-            cur = build_lora_mm_id(gate_exps, cur, selected_experts, gate_exps_s); // [n_ff, n_expert_used, n_tokens]
+            if (sw) {
+                cur = ggml_mul_mat_id(ctx0, sw->gate_cache, cur, ids_hot); // hot side only
+            } else {
+                cur = build_lora_mm_id(gate_exps, cur, selected_experts, gate_exps_s); // [n_ff, n_expert_used, n_tokens]
+            }
             cb(cur, "ffn_moe_gate", il);
         } else {
             cur = up;
@@ -2095,7 +2124,21 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
             GGML_ABORT("fatal error");
     }
 
-    experts = build_lora_mm_id(down_exps, cur, selected_experts, down_exps_s); // [n_embd, n_expert_used, n_tokens]
+    if (sw) {
+        // hot side finishes on GPU; cold side runs its full chain as one contiguous CPU island
+        GGML_ASSERT(type_op == LLM_FFN_SILU && "statewise cold chain: only SILU/swiglu supported");
+        ggml_tensor * d_hot = ggml_mul_mat_id(ctx0, sw->down_cache, cur, ids_hot);
+        ggml_tensor * g_c = ggml_mul_mat_id(ctx0, gate_exps, sw_x, ids_cold);
+        g_c->op_params[0] = 1; // sentinel ids
+        ggml_tensor * u_c = ggml_mul_mat_id(ctx0, up_exps, sw_x, ids_cold);
+        u_c->op_params[0] = 1;
+        ggml_tensor * a_c = ggml_swiglu_split(ctx0, g_c, u_c);
+        ggml_tensor * d_c = ggml_mul_mat_id(ctx0, down_exps, a_c, ids_cold);
+        d_c->op_params[0] = 1;
+        experts = ggml_add(ctx0, d_hot, d_c);
+        } else {
+            experts = build_lora_mm_id(down_exps, cur, selected_experts, down_exps_s); // [n_embd, n_expert_used, n_tokens]
+        }
     cb(experts, "ffn_moe_down", il);
 
     if (down_exps_s) {

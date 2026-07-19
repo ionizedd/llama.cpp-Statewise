@@ -133,6 +133,13 @@ llama_model_qwen3moe::graph::graph(const llama_model & model, const llm_graph_pa
                 LLM_NORM_RMS, il);
         cb(cur, "ffn_norm", il);
 
+        llama_statewise_layer sw_layer = {
+            model.layers[il].ffn_gate_exps_cache,
+            model.layers[il].ffn_up_exps_cache,
+            model.layers[il].ffn_down_exps_cache,
+            model.layers[il].statewise_map_hot,
+            model.layers[il].statewise_map_cold,
+        };
         ggml_tensor * moe_out =
             build_moe_ffn(cur,
                     model.layers[il].ffn_gate_inp,
@@ -148,7 +155,9 @@ llama_model_qwen3moe::graph::graph(const llama_model & model, const llm_graph_pa
                     nullptr, nullptr,
                     model.layers[il].ffn_up_exps_s,
                     model.layers[il].ffn_gate_exps_s,
-                    model.layers[il].ffn_down_exps_s);
+                    model.layers[il].ffn_down_exps_s,
+                    /* selected_experts_in */ nullptr,
+                    model.layers[il].ffn_gate_exps_cache ? &sw_layer : nullptr);
         cb(moe_out, "ffn_moe_out", il);
         cur = moe_out;
 

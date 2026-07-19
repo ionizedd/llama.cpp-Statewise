@@ -882,6 +882,15 @@ struct llm_graph_qkv {
     ggml_tensor * v; // [n_embd_head, n_head_kv, n_tokens]
 };
 
+// statewise expert cache: per-layer hot-expert tensors + id remap tables (see DESIGN.md)
+struct llama_statewise_layer {
+    ggml_tensor * gate_cache = nullptr; // [n_embd, n_ff_exp, K+1], slot K = zeros (dummy for GPU misses)
+    ggml_tensor * up_cache   = nullptr;
+    ggml_tensor * down_cache = nullptr; // [n_ff_exp, n_embd, K+1]
+    ggml_tensor * map_hot    = nullptr; // I32 [1, n_expert]: expert -> cache slot, miss -> K
+    ggml_tensor * map_cold   = nullptr; // I32 [1, n_expert]: expert -> expert, hit -> -1 (cpu sentinel)
+};
+
 struct llm_graph_context {
     const llm_arch arch;
 
@@ -1017,7 +1026,8 @@ struct llm_graph_context {
              ggml_tensor * up_exps_s = nullptr,
              ggml_tensor * gate_exps_s = nullptr,
              ggml_tensor * down_exps_s = nullptr,
-             ggml_tensor * selected_experts_in = nullptr) const;
+             ggml_tensor * selected_experts_in = nullptr,
+            const llama_statewise_layer * sw = nullptr) const;
 
     ggml_tensor * build_moe_ffn(
              ggml_tensor * cur,
@@ -1043,7 +1053,8 @@ struct llm_graph_context {
              ggml_tensor * up_exps_s = nullptr,
              ggml_tensor * gate_exps_s = nullptr,
              ggml_tensor * down_exps_s = nullptr,
-             ggml_tensor * selected_experts_in = nullptr) const;
+             ggml_tensor * selected_experts_in = nullptr,
+            const llama_statewise_layer * sw = nullptr) const;
 
     //
     // inputs
