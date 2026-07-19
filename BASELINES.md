@@ -35,3 +35,8 @@ KEY: static layer-split (ncmoe) hit-rate == uniform curve. Dynamic per-expert ca
 Projection at ncmoe-20 VRAM budget: expert-read eff. BW ~92 -> ~357 GB/s => est. 40-50 t/s vs 33.9 static (pre spec-decode).
 Caveats: wikitext-only (validate code/chat corpora), 512-tok contexts, known assert w/ -b 2048 (guard TODO).
 Full per-layer data: expert_counts.csv (layer,expert,count).
+
+## Hot-set stability — 2026-07-19 (the design-deciding numbers)
+Top-32/layer overlap: WITHIN-domain (wikitext A/B halves, 24k tok each) = 83.9%. CROSS-domain (wikitext vs C++ code) = 11.3% (random = 25% -> ANTI-correlated: true domain specialists).
+Code corpus is even skewier than prose: cov32 = 84.4% (vs 70.4), K90 avg 42.2 (vs 55.6).
+VERDICT: static/offline expert placement cannot survive workload shifts; the VRAM expert cache must be ONLINE-ADAPTIVE (usage counters + per-layer budgets + hysteresis). Domain switch re-warm cost ~3.6GB over ReBAR ~= 150ms one-time -> amortized in dozens of tokens. This is the statewise thesis, now with data.
