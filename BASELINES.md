@@ -21,3 +21,17 @@ Notes:
 - Static frontier: 16.6 -> 33.9 t/s. VRAM edge not yet found (try ncmoe 16/12, or --fit-target).
 - Hybrid pp512 (75-227) is disproportionately bad vs dense GPU pp (3080) -> investigate -ub/-b batching of CPU expert matmuls.
 - FORK TARGETS: (1) per-expert routing telemetry -> measure hot/cold skew; (2) dynamic hot-expert VRAM cache to beat static frontier; (3) zero-bandwidth draft spec decode (statewise_speculative_decoding heritage); (4) thread/kernel tuning to lift CPU 43 GB/s eff toward ~65; (5) DirectStorage tier later.
+
+## Expert routing telemetry — 2026-07-18, Qwen3-30B-A3B-2507, wikitext-2, 49,152 tokens (96x512 chunks)
+Tool: tools/expert-stats (cb_eval hook on ffn_moe_topk, stride-corrected view read)
+MEAN coverage if top-K experts/layer were VRAM-cached:
+| K cached | 8 | 16 | 24 | 32 | 48 | 64 |
+|---|---|---|---|---|---|---|
+| hit %  | 31.6 | 48.1 | 60.4 | 70.4 | 85.2 | 93.9 |
+| uniform| 6.25 | 12.5 | 18.8 | 25.0 | 37.5 | 50.0 |
+| VRAM   | 0.9GB| 1.8GB| 2.7GB| 3.6GB| 5.4GB| 7.3GB|
+K90: avg 55.6 (44-83 across layers) vs 116 uniform. Skew is real: ~2.8x uniform at K=32.
+KEY: static layer-split (ncmoe) hit-rate == uniform curve. Dynamic per-expert cache at 8.5GB ~= 96% vs static 58%.
+Projection at ncmoe-20 VRAM budget: expert-read eff. BW ~92 -> ~357 GB/s => est. 40-50 t/s vs 33.9 static (pre spec-decode).
+Caveats: wikitext-only (validate code/chat corpora), 512-tok contexts, known assert w/ -b 2048 (guard TODO).
+Full per-layer data: expert_counts.csv (layer,expert,count).

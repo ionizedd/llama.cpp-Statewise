@@ -35,16 +35,29 @@ static bool collect_topk(struct ggml_tensor * t, bool ask, void * user_data) {
     const char * dash = strrchr(t->name, '-');
     if (dash) il = atoi(dash + 1);
 
-    const int64_t n_sel = ggml_nelements(t);
-    st->buf.resize(n_sel);
-    ggml_backend_tensor_get(t, st->buf.data(), 0, n_sel * sizeof(int32_t));
+    // ffn_moe_topk is typically a non-contiguous VIEW (top n_expert_used rows of the
+    // [n_expert, n_tokens] argsort) -> must honor nb[] strides, not read linearly
+    const int64_t ne0 = t->ne[0];                          // n_expert_used
+    const int64_t ne1 = t->ne[1] * t->ne[2] * t->ne[3];    // n_tokens
+    const size_t  row_stride = t->nb[1] / sizeof(int32_t); // underlying row length
+    static bool printed = false;
+    if (!printed) {
+        fprintf(stderr, "expert-stats: topk '%s' ne=[%lld,%lld] row_stride=%zu cont=%d\n",
+            t->name, (long long) ne0, (long long) ne1, row_stride, (int) ggml_is_contiguous(t));
+        printed = true;
+    }
+    const size_t span_bytes = (size_t)(ne1 - 1) * t->nb[1] + (size_t) ne0 * sizeof(int32_t);
+    st->buf.resize((span_bytes + sizeof(int32_t) - 1) / sizeof(int32_t));
+    ggml_backend_tensor_get(t, st->buf.data(), 0, span_bytes);
 
     auto & c = st->counts[il];
-    for (int64_t i = 0; i < n_sel; i++) {
-        const int32_t id = st->buf[i];
-        if (id < 0) continue;
-        if ((size_t) id >= c.size()) c.resize(id + 1, 0);
-        c[id]++;
+    for (int64_t j = 0; j < ne1; j++) {
+        for (int64_t i = 0; i < ne0; i++) {
+            const int32_t id = st->buf[j * row_stride + i];
+            if (id < 0) continue;
+            if ((size_t) id >= c.size()) c.resize(id + 1, 0);
+            c[id]++;
+        }
     }
     return true;
 }
@@ -163,4 +176,5 @@ int main(int argc, char ** argv) {
 
     return 0;
 }
+
 
