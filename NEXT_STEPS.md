@@ -35,3 +35,13 @@ Measured A/B, novel-codegen prompt, 256 tok, ncmoe20: baseline 32.9 t/s | ngram-
 - NEW #1 boundary-tax lead (from Vern's gpu_step_acceleration.hip pattern): profile ggml-vulkan submission granularity per decode token (one vkQueueSubmit or many?). If many -> batch into fewer submissions. Cheap to profile; decides itself.
 - HARD CONSTRAINT (measured on THIS 7800X3D, bitshredder results_v2): sustained CPU read BW ~77GB/s up to ~90MB working set, then V-CACHE CLIFF -> ~44GB/s (-43%). Keep per-token CPU-touched expert bytes well under 90MB. Current worst case (miss set) is fine; matters if cold tier grows.
 - Not worth pursuing (agent audit): hdc_bvh (accuracy collapse), crystal_brain/seedpack (different research program), weight_distillation/seed proofs (Vern already self-disproved via seed_entropy_proof - respect).
+
+## V2 BLUEPRINT — online adaptation (the core deliverable, post-v1 validation)
+Goal: make the OOD row of the v1 table (25.8) climb toward the in-distribution row (31.2+) by letting the hot set follow the workload.
+Architecture: supervisor OUTSIDE the graph (common/ or server layer), core stays thin:
+1. Counters: cb_eval hook on ffn_moe_topk (proven in tools/expert-stats) accumulates per-layer expert counts in a ring window (~2048 tokens).
+2. Small C API on llama_model: llama_statewise_swap(model, layer, slot, new_expert_id) -> copies one expert slab (2.4MB) into the cache slot via tensor_set + updates both map tensors (2 floats). All between decodes; no graph changes.
+3. Policy (hysteresis): every 256 tokens, per layer: candidate = hottest uncached expert, victim = coldest cached slot; swap only if count_cand > 1.5x count_victim; cap ~4 swaps/layer/refresh. Full domain shift re-warms in ~2-3k tokens (~150ms total copy cost, amortized).
+4. Instrument: log hit-rate per window (counts vs map) -> the v2 success metric IS the live hit-rate curve recovering after a domain switch.
+5. Test: the wiki->code mid-session switch. v1 static: hit rate collapses and stays down. v2: collapses then recovers. Chart it.
+Also queued: solver to charge pp compute-buffer headroom (C config pp dip 538->380); correctness note: split-path pp still guarded off (n_tokens<=8).
