@@ -45,3 +45,13 @@ Architecture: supervisor OUTSIDE the graph (common/ or server layer), core stays
 4. Instrument: log hit-rate per window (counts vs map) -> the v2 success metric IS the live hit-rate curve recovering after a domain switch.
 5. Test: the wiki->code mid-session switch. v1 static: hit rate collapses and stays down. v2: collapses then recovers. Chart it.
 Also queued: solver to charge pp compute-buffer headroom (C config pp dip 538->380); correctness note: split-path pp still guarded off (n_tokens<=8).
+
+## HANDOFF MAP — for relay sessions (Fable does core work, Sonnet dispatches for builds/benches/polling)
+DIRECTORIES:
+- C:\dev\llama.cpp        THE FORK. branch statewise -> github.com/ionizedd/llama.cpp-Statewise. Docs: README-STATEWISE.md, DESIGN.md, BASELINES.md, NEXT_STEPS.md (this file). Artifacts: statewise_map.txt, statewise_placement.json. Tools: tools/expert-stats, tools/statewise-poc (+solve_placement.py).
+- C:\dev\                 scripts (build_sw.bat, smoke_sw.bat, triage.bat, wiki_ab.bat, push_fork.bat), logs (*.log), python patch scripts (patch_*.py - the reliable way to edit source on this box), telemetry CSVs (expert_counts.csv wiki; es_code\, es_wA\, es_wB\).
+- G:\models\              GGUFs (Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf = the model) + corpus\ (wikitext, code.txt).
+- C:\Users\PC\.gemini\antigravity-ide\scratch\   Vern's prior-ideas archive (audited; see session addendum above).
+- C:\Users\PC\byte-llm-fork\                     fleagle's ByteSieve-GLA: ~90M byte-level LM, O(1) recurrent state, no KV cache, tokenizer-free, has specdec\ subdir. INTEGRATION ANGLES: (a) draft model for speculative decoding (near-zero bandwidth; needs byte->token vocab bridge - nontrivial, research-grade); (b) port the arch into this fork as a GGUF-runnable model (llama.cpp already runs GLA-family archs). Scope with Vern/fleagle first.
+BOOT SEQUENCE FOR A FRESH FABLE: (1) nyzkh-memory recall "statewise"; (2) read this file top to bottom; (3) git log --oneline -10 in the fork; (4) current work = V2 BLUEPRINT section above. Environment quirks are in the crib sheet section. Editing rule: use python patch scripts with exact-match+count asserts (see C:\dev\patch_*.py), never PS here-string source edits.
+STATE AT HANDOFF (2026-07-20): v1 cache VALIDATED (+10.6% in-distribution, token-identical, OOD-neutral as designed). v2 online adaptation is next: blueprint above, all steps concrete. Same-session baselines only (box variance ~±3 t/s day to day).
