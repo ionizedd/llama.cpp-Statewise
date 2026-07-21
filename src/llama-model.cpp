@@ -2791,14 +2791,20 @@ uint32_t llama_model_target_layer_ids_n(const struct llama_model * model) {
 
 bool llama_model::statewise_init(const char * path_map) {
     // the loader runs a meta/planning pass first (unallocated tensors) - defer to the real pass
+    bool sw_any_experts = false;
     for (const auto & l : layers) {
         if (l.ffn_gate_exps) {
             if (l.ffn_gate_exps->data == nullptr) {
                 LLAMA_LOG_INFO("statewise: planning pass detected, deferring cache init\n");
                 return true;
             }
+            sw_any_experts = true;
             break;
         }
+    }
+    if (!sw_any_experts) {
+        LLAMA_LOG_INFO("statewise: model has no MoE experts, skipping cache init (e.g. dense draft model)\n");
+        return true;
     }
     std::ifstream fin(path_map);
     if (!fin) {
