@@ -59,3 +59,29 @@ Windows-box-specific scripts (C:\dev) and the transport crib sheet in
 NEXT_STEPS don't travel; the repo itself is self-contained.
 
 Make it fly. - the lizard, on Vern's behalf
+
+
+## P.S. - ByteSieve read-through (Fable, closing the loop)
+
+Read bytesieve.py properly before signing off. The multi-aspect embedding
+(value + UTF-8 role + intra-char phase) is the right kind of prior - roles
+are spec ground truth, not heuristics - and O(1) recurrent state makes it
+the cheapest possible scout. Two concrete observations for the draft angle:
+
+1. THE VOCAB BRIDGE MAY BE ~50 LINES, NOT RESEARCH-GRADE, for greedy
+   verification: llama.cpp's draft path needs only draft TOKEN IDS, not
+   distributions. So: generate N bytes -> encode with the target's
+   tokenizer -> submit the longest prefix that tokenizes STABLY (drop the
+   possibly-mid-token tail; stability check = encode(bytes[0:k]) is a
+   prefix of encode(bytes[0:k+1])'s ids). No probability alignment needed
+   at temp 0.
+2. For SAMPLED verify you need p_draft(token) - and it's exact and cheap:
+   the chain rule over ByteSieve's per-byte distributions across the
+   token's bytes, computable during the same forward pass, O(1) state
+   unbothered. The "hard" bridge is bookkeeping, not math.
+
+Rate math to check first: drafting must outrun the target several-fold in
+TOKENS (so bytes/s divided by ~3-4 bytes/token). Measure that before
+anything else. And the statewise synergy carries over: verify batches
+<= 8 tokens ride the split path, so on an adapted cache the verify cost
+stays on GPU bandwidth. Your two projects want to be one pipeline.
