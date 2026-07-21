@@ -76,3 +76,7 @@ FIRST run 20.6 t/s vs 30.2 no-draft: INVALID - RAM over-commit (pagefile peak 25
 CORE FIX SHIPPED: statewise_init now no-ops for models without MoE experts (sw_any_experts guard) - previously LLAMA_STATEWISE_MAP killed ANY dense draft/aux model load in the same process.
 RETRY RECIPE: confirm >=24GB free idle, add --no-mmap back to C:\dev\spec_fair.bat, run - valid pair in ~4 min. THESIS unchanged and still worth the retry: verify batches <=8 tok stay on the split path so ~97% of verify expert reads hit the GPU cache -> MoE-hybrid spec finally viable; n-max 3 variant in C:\dev\spec_probe.bat.
 HARDWARE (ranked for this roadmap): (1) 64GB RAM - biggest lever, unlocks spec + kills the whole paging failure class. (2) move GGUFs to the idle NVMe (Disk 2, 0% active in Task Manager) - SATA G: caps ~550MB/s, this makes every load and any mmap eviction ~6x cheaper. (3) cloud GPU: NOT for inference (local-first is the whole point); revisit only to train our own draft (ByteSieve distill / acceptance-tuned tiny model, few hours rental).
+
+
+## TORCH PASSED (2026-07-21, end of day)
+Project handed to fleagle - this work is bandwidth-bound and his hardware fits it (more GPUs, much more RAM/VRAM). Read FLEAGLE_HANDOFF.md at repo root first; it maps everything including the open spec-decode experiment and where bigger VRAM changes the placement math. Vern's local roadmap moves to the zeri-snn specialized-brain line (separate tree, out of this repo). Future Fable/Sonnet sessions on Vern's box: recall "statewise" for history; active development continues with fleagle.
