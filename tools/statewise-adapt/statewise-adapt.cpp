@@ -269,5 +269,17 @@ int main(int argc, char ** argv) {
         printf("phase B end   (last 4 B epochs): %5.1f%%\n", mean_range(n_ep - 4, n_ep));
     }
     printf("csv: %s\n", csv_path);
+
+    // dump the adapted map in statewise_init format -> reusable by any tool via LLAMA_STATEWISE_MAP
+    if (const char * dump = getenv("SW_DUMP_MAP")) {
+        std::ofstream fout(dump);
+        fout << "# adapted map dumped by statewise-adapt\n";
+        for (auto & kv : shadows) {
+            fout << kv.first << " " << kv.second.K;
+            for (int32_t s2 = 0; s2 < kv.second.K; s2++) fout << " " << kv.second.slot_expert[s2];
+            fout << "\n";
+        }
+        printf("dumped adapted map: %s\n", dump);
+    }
     return 0;
 }

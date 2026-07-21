@@ -73,3 +73,17 @@ hit rate over 31 cached layers; phase A = wikiA 4096 tok, phase B = code 4096 to
 | v2 adaptive | 95.6% | 19.2% | 97.3% (>93% within 1792 tok) |
 
 curves: sw_v2_static.csv / sw_v2_adapt.csv / statewise_v2_recovery.png
+
+
+## V2 adapted-map t/s bench - code prompt, tg256, temp 0 (2026-07-21, same-session triplet)
+adapted map from SW_DUMP_MAP after 4096-tok re-warm on code.txt head (97.2% hit); bench prompt from code.txt offset 300k (disjoint region); same -ot / flags across runs
+
+| cache | hit regime | gen t/s |
+|---|---|---|
+| none | - | 29.0 |
+| wiki map (stale) | ~16% | 28.1 (net LOSS) |
+| code-adapted map | ~97% | 30.2 |
+
+Adaptation swings OOD decode from -3% to +4% (+7.5% stale->adapted). Ordering exactly as theory: misses pay hot-path overhead, hits pay off.
+
+IDENTITY NOTE (scopes the v1 claim): at 256 tok the three runs share an identical prefix (~60 gen tokens) then diverge at a wording tie, all continuations coherent and equal quality. CPU-vs-GPU expert placement numerics can flip greedy ties on longer runs - v1's token-identity (128 tok, wiki) does not generalize to arbitrary length. Same correctness class as -ngl placement variation; NOT a routing bug (no swaps active in these cli runs, static maps only).
