@@ -628,6 +628,8 @@ struct llama_model {
     ggml_context * statewise_ctx = nullptr;
     ggml_backend_buffer_t statewise_buf = nullptr;
     bool statewise_init(const char * path_map);
+    int32_t statewise_swap(int32_t il, int32_t slot, int32_t expert_id);
+    int32_t statewise_layer_k(int32_t il) const;
 
     // for quantize-stats only
     std::vector<std::pair<std::string, struct ggml_tensor *>> tensors_by_name;

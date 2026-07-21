@@ -2911,3 +2911,72 @@ bool llama_model::statewise_init(const char * path_map) {
     LLAMA_LOG_INFO("statewise: cached %zu layers, %.1f MiB in device memory (incl. dummy slots)\n", plans.size(), total/1024.0/1024.0);
     return true;
 }
+
+// statewise v2: swap one expert into a hot-cache slot. between-decodes only -
+// the graph reads map_hot/map_cold via get_rows at eval time, so map writes
+// take effect on the next decode with no graph rebuild. slab copy first, map
+// flips last, so a consistent map is maintained at every point.
+int32_t llama_model::statewise_swap(int32_t il, int32_t slot, int32_t expert_id) {
+    if (il < 0 || il >= (int32_t) layers.size()) {
+        return -1;
+    }
+    auto & l = layers[il];
+    if (!l.ffn_gate_exps_cache || !l.statewise_map_hot || !l.statewise_map_cold) {
+        return -2;
+    }
+    const int32_t n_expert_i = (int32_t) hparams.n_expert;
+    const int64_t K = l.ffn_gate_exps_cache->ne[2] - 1;
+    if (slot < 0 || (int64_t) slot >= K) {
+        return -3;
+    }
+    if (expert_id < 0 || expert_id >= n_expert_i) {
+        return -4;
+    }
+
+    std::vector<float> mh(n_expert_i);
+    ggml_backend_tensor_get(l.statewise_map_hot, mh.data(), 0, (size_t) n_expert_i*sizeof(float));
+    if ((int64_t) mh[expert_id] != K) {
+        return 1; // already hot -> no-op
+    }
+    int32_t victim = -1;
+    for (int32_t i = 0; i < n_expert_i; i++) {
+        if ((int64_t) mh[i] == (int64_t) slot) { victim = i; break; }
+    }
+
+    ggml_tensor * srcs[3] = { l.ffn_gate_exps,       l.ffn_up_exps,       l.ffn_down_exps       };
+    ggml_tensor * dsts[3] = { l.ffn_gate_exps_cache, l.ffn_up_exps_cache, l.ffn_down_exps_cache };
+    std::vector<uint8_t> staging;
+    for (int t = 0; t < 3; t++) {
+        const size_t slab = ggml_nbytes(srcs[t]) / (size_t) srcs[t]->ne[2];
+        staging.resize(slab);
+        ggml_backend_tensor_get(srcs[t], staging.data(), (size_t) expert_id*slab, slab);
+        ggml_backend_tensor_set(dsts[t], staging.data(), (size_t) slot*slab, slab);
+    }
+    float f;
+    if (victim >= 0) {
+        f = (float) K;      ggml_backend_tensor_set(l.statewise_map_hot,  &f, (size_t) victim*sizeof(float), sizeof(float));
+        f = (float) victim; ggml_backend_tensor_set(l.statewise_map_cold, &f, (size_t) victim*sizeof(float), sizeof(float));
+    }
+    f = (float) slot; ggml_backend_tensor_set(l.statewise_map_hot,  &f, (size_t) expert_id*sizeof(float), sizeof(float));
+    f = -1.0f;        ggml_backend_tensor_set(l.statewise_map_cold, &f, (size_t) expert_id*sizeof(float), sizeof(float));
+    return 0;
+}
+
+int32_t llama_model::statewise_layer_k(int32_t il) const {
+    if (il < 0 || il >= (int32_t) layers.size()) {
+        return 0;
+    }
+    const auto & l = layers[il];
+    if (!l.ffn_gate_exps_cache) {
+        return 0;
+    }
+    return (int32_t) (l.ffn_gate_exps_cache->ne[2] - 1);
+}
+
+int32_t llama_statewise_swap(llama_model * model, int32_t il, int32_t slot, int32_t expert_id) {
+    return model->statewise_swap(il, slot, expert_id);
+}
+
+int32_t llama_statewise_layer_k(const llama_model * model, int32_t il) {
+    return model->statewise_layer_k(il);
+}

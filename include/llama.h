@@ -623,6 +623,13 @@ extern "C" {
     // Returns the total number of parameters in the model
     LLAMA_API uint64_t llama_model_n_params(const struct llama_model * model);
 
+    // statewise (fork): v2 online adaptation API. swap one expert slab into cache
+    // slot of layer il. call ONLY between decodes. returns 0 ok, +1 no-op (expert
+    // already hot), negative on error (bad layer/slot/expert or layer not cached).
+    LLAMA_API int32_t llama_statewise_swap(struct llama_model * model, int32_t il, int32_t slot, int32_t expert_id);
+    // number of hot slots K for layer il, 0 if layer has no statewise cache
+    LLAMA_API int32_t llama_statewise_layer_k(const struct llama_model * model, int32_t il);
+
     // Returns true if the model contains an encoder that requires llama_encode() call
     LLAMA_API bool llama_model_has_encoder(const struct llama_model * model);
 
