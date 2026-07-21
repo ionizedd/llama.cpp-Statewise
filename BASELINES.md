@@ -61,3 +61,15 @@ THE THESIS, MEASURED: static profile cache wins in-distribution and does nothing
 Engineering notes: shader-side sentinel guard costs ~11% globally (REJECTED - reverted; vulkan tripwire
 instead, cold side owned by CPU). Split is decode-only (n_tokens<=8); pp stays dense. pp under C dips
 (538->380) from cache VRAM eating compute-buffer headroom -> charge pp headroom in the solver later.
+
+
+
+## V2 online adaptation - wiki->code domain-switch A/B (2026-07-21, same-session pair)
+hit rate over 31 cached layers; phase A = wikiA 4096 tok, phase B = code 4096 tok; epoch 256, window 8, hyst 1.5, <=4 swaps/layer/epoch
+
+| run | phase A end | switch dip | phase B end |
+|---|---|---|---|
+| v1 static | 90.3% | 17.6% | 16.3% (never recovers) |
+| v2 adaptive | 95.6% | 19.2% | 97.3% (>93% within 1792 tok) |
+
+curves: sw_v2_static.csv / sw_v2_adapt.csv / statewise_v2_recovery.png
