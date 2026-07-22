@@ -80,3 +80,11 @@ HARDWARE (ranked for this roadmap): (1) 64GB RAM - biggest lever, unlocks spec +
 
 ## TORCH PASSED (2026-07-21, end of day)
 Project handed to fleagle - this work is bandwidth-bound and his hardware fits it (more GPUs, much more RAM/VRAM). Read FLEAGLE_HANDOFF.md at repo root first; it maps everything including the open spec-decode experiment and where bigger VRAM changes the placement math. Vern's local roadmap moves to the zeri-snn specialized-brain line (separate tree, out of this repo). Future Fable/Sonnet sessions on Vern's box: recall "statewise" for history; active development continues with fleagle.
+
+
+## LOCAL THREAD - stays alive for nyzkh (2026-07-22)
+Repo goes to fleagle, but Ace keeps developing statewise locally too - this
+engine's throughput matters for nyzkh directly, not only for fleagle's
+hardware. Spec-decode-for-nyzkh (retry recipe above) is first on that local
+thread. Bandwidth-reduction ideas discussed live 2026-07-22; write-up lands
+here once a direction is picked.
